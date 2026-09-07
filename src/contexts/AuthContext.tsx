@@ -1,25 +1,33 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { api, getStoredToken, setStoredToken, removeStoredToken } from '@/lib/api';
 
 const DEMO_MODE_KEY = 'mining_demo_mode';
+
+export interface User {
+  id: string;
+  email: string;
+  full_name?: string;
+  phone_number?: string;
+  role?: string;
+  mine_site_id?: string;
+}
 
 export const DEMO_USER: User = {
   id: '00000000-0000-4000-8000-000000000001',
   email: 'demo@mining-safety.app',
-  app_metadata: { provider: 'demo' },
-  user_metadata: { name: 'Demo User' },
-  aud: 'authenticated',
-  created_at: '2024-01-01T00:00:00.000Z',
-} as User;
+  full_name: 'Demo Operator',
+  role: 'operator',
+  mine_site_id: 'ms-001-demo-mine',
+};
 
 interface AuthContextType {
   user: User | null;
-  session: Session | null;
   loading: boolean;
   isDemoMode: boolean;
   enterDemoMode: () => void;
   signOut: () => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, fullName?: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -38,16 +46,35 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDemoMode, setIsDemoMode] = useState(false);
 
   const enterDemoMode = () => {
     localStorage.setItem(DEMO_MODE_KEY, 'true');
     setIsDemoMode(true);
-    setSession(null);
     setUser(DEMO_USER);
     setLoading(false);
+  };
+
+  const fetchCurrentUser = async () => {
+    const token = getStoredToken();
+    if (!token) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const userData = await api.get<User>('/api/auth/me');
+      setUser(userData);
+      setIsDemoMode(false);
+    } catch (err) {
+      console.warn('[AuthContext] Failed to fetch current user:', err);
+      removeStoredToken();
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -59,58 +86,73 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       return;
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (localStorage.getItem(DEMO_MODE_KEY) === 'true') {
-          return;
-        }
-
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (localStorage.getItem(DEMO_MODE_KEY) === 'true') {
-        return;
-      }
-
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    fetchCurrentUser();
   }, []);
+
+  const login = async (email: string, password: string) => {
+    localStorage.removeItem(DEMO_MODE_KEY);
+    setIsDemoMode(false);
+    setLoading(true);
+
+    try {
+      const res = await api.post('/api/auth/login', { email, password });
+      setStoredToken(res.access_token);
+      setUser(res.user);
+    } catch (err) {
+      setLoading(false);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const register = async (email: string, password: string, fullName?: string) => {
+    localStorage.removeItem(DEMO_MODE_KEY);
+    setIsDemoMode(false);
+    setLoading(true);
+
+    try {
+      await api.post('/api/auth/register', {
+        email,
+        password,
+        full_name: fullName || email.split('@')[0],
+      });
+      // Auto login after registration
+      await login(email, password);
+    } catch (err) {
+      setLoading(false);
+      throw err;
+    }
+  };
 
   const signOut = async () => {
     if (isDemoMode || localStorage.getItem(DEMO_MODE_KEY) === 'true') {
       localStorage.removeItem(DEMO_MODE_KEY);
       setIsDemoMode(false);
       setUser(null);
-      setSession(null);
       return;
     }
 
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      console.error('Error signing out:', error);
+    try {
+      await api.post('/api/auth/logout');
+    } catch (e) {
+      // ignore
+    } finally {
+      removeStoredToken();
+      setUser(null);
+      setIsDemoMode(false);
     }
   };
 
   const value = {
     user,
-    session,
     loading,
     isDemoMode,
     enterDemoMode,
     signOut,
+    login,
+    register,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
