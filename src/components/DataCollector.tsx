@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { api } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
 interface DataCollectorProps {
@@ -16,7 +16,7 @@ export const DataCollector: React.FC<DataCollectorProps> = ({ mineSiteId, isActi
   }>({
     sensor: null,
     weather: null,
-    thermal: null
+    thermal: null,
   });
 
   // Generate realistic sensor data
@@ -28,7 +28,7 @@ export const DataCollector: React.FC<DataCollectorProps> = ({ mineSiteId, isActi
       moisture: 45 + Math.random() * 30, // 45-75% humidity typical for India
       temperature: baseTemperature,
       strain: 1.5 + Math.random() * 2, // 1.5-3.5 MPa
-      displacement: Math.random() * 3 // 0-3mm
+      displacement: Math.random() * 3, // 0-3mm
     };
   };
 
@@ -36,14 +36,14 @@ export const DataCollector: React.FC<DataCollectorProps> = ({ mineSiteId, isActi
   const generateWeatherData = () => {
     const currentMonth = new Date().getMonth() + 1;
     const isMonsoon = currentMonth >= 6 && currentMonth <= 9;
-    
+
     return {
       temperature: isMonsoon ? 28 + Math.random() * 8 : 32 + Math.random() * 12,
       humidity: isMonsoon ? 70 + Math.random() * 25 : 45 + Math.random() * 30,
       rainfall: isMonsoon ? Math.random() * 50 : Math.random() * 5,
       windSpeed: 8 + Math.random() * 15,
       pressure: 1010 + Math.random() * 15,
-      visibility: Math.random() > 0.8 ? 'poor' : 'good'
+      visibility: Math.random() > 0.8 ? 'poor' : 'good',
     };
   };
 
@@ -51,41 +51,39 @@ export const DataCollector: React.FC<DataCollectorProps> = ({ mineSiteId, isActi
   const generateThermalData = () => {
     const baseTemp = 40 + Math.random() * 20;
     const hotSpots = Math.floor(Math.random() * 6);
-    
+
     return {
       averageTemp: baseTemp,
       maxTemp: baseTemp + 10 + Math.random() * 20,
       hotSpots,
-      thermalAnomaly: hotSpots > 3 || Math.random() > 0.8
+      thermalAnomaly: hotSpots > 3 || Math.random() > 0.8,
     };
   };
 
-  // Send data to ingestion function
+  // Send data to ingestion function via FastAPI
   const sendData = async (streamType: string, data: any, source: string) => {
     try {
-      const response = await supabase.functions.invoke('data-ingestion', {
-        body: {
-          streamType,
-          mineSiteId,
-          data,
-          source
-        }
+      const response = await api.post('/api/data/ingestion', {
+        streamType,
+        mineSiteId,
+        data,
+        source,
+        indianConditions: {
+          geological_type: 'Laterite',
+          monsoon_season: true,
+          groundwater_level: 4.5,
+        },
       });
-
-      if (response.error) {
-        console.error(`${streamType} data ingestion failed:`, response.error);
-      } else {
-        console.log(`${streamType} data ingested successfully:`, response.data);
-      }
+      console.log(`${streamType} data ingested successfully:`, response);
     } catch (error) {
-      console.error(`Error sending ${streamType} data:`, error);
+      console.warn(`Error sending ${streamType} data to FastAPI:`, error);
     }
   };
 
   // Start data collection
   const startDataCollection = () => {
     console.log('Starting data collection for mine site:', mineSiteId);
-    
+
     // Sensor data every 3 seconds
     intervalRefs.current.sensor = setInterval(() => {
       const sensorData = generateSensorData();
@@ -112,12 +110,12 @@ export const DataCollector: React.FC<DataCollectorProps> = ({ mineSiteId, isActi
 
   // Stop data collection
   const stopDataCollection = () => {
-    Object.values(intervalRefs.current).forEach(interval => {
+    Object.values(intervalRefs.current).forEach((interval) => {
       if (interval) clearInterval(interval);
     });
-    
+
     intervalRefs.current = { sensor: null, weather: null, thermal: null };
-    
+
     toast({
       title: "⏹️ Data Collection Stopped",
       description: "Mining data simulation has been paused",

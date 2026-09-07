@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { supabase } from '@/integrations/supabase/client';
 import { Shield, Mail, Lock, UserPlus, LogIn, PlayCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -18,18 +17,13 @@ const Auth = () => {
   const [message, setMessage] = useState('');
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { enterDemoMode } = useAuth();
+  const { user, login, register, enterDemoMode } = useAuth();
 
   useEffect(() => {
-    // Check if user is already logged in
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        navigate('/');
-      }
-    };
-    checkUser();
-  }, [navigate]);
+    if (user) {
+      navigate('/');
+    }
+  }, [user, navigate]);
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,31 +31,14 @@ const Auth = () => {
     setMessage('');
 
     try {
-      const redirectUrl = `${window.location.origin}/`;
-      
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: redirectUrl
-        }
+      await register(email, password);
+      toast({
+        title: "Account Created",
+        description: "Welcome to the Mining Safety System!",
       });
-
-      if (error) {
-        if (error.message.includes('already registered')) {
-          setMessage('This email is already registered. Try signing in instead.');
-        } else {
-          setMessage(error.message);
-        }
-      } else {
-        setMessage('Check your email for the confirmation link!');
-        toast({
-          title: "Account Created",
-          description: "Please check your email to confirm your account",
-        });
-      }
+      navigate('/');
     } catch (error: any) {
-      setMessage(error.message);
+      setMessage(error.message || 'Failed to register account');
     } finally {
       setLoading(false);
     }
@@ -82,22 +59,14 @@ const Auth = () => {
     setMessage('');
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      await login(email, password);
+      toast({
+        title: "Welcome Back!",
+        description: "Successfully signed in",
       });
-
-      if (error) {
-        setMessage(error.message);
-      } else {
-        toast({
-          title: "Welcome Back!",
-          description: "Successfully signed in",
-        });
-        navigate('/');
-      }
+      navigate('/');
     } catch (error: any) {
-      setMessage(error.message);
+      setMessage(error.message || 'Invalid email or password');
     } finally {
       setLoading(false);
     }
